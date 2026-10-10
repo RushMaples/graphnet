@@ -1,0 +1,104 @@
+project_name: IceMix-P14-Three-Pilot10pct
+run_name: IceMix-P14-Three-Pilot10pct_2026-09-25_10-02-45_job-13567223
+seed: 42
+debug: false
+precision: 16-mixed
+num_workers: 3
+max_epochs: 5
+early_stopping_patience: 0
+accumulate_grad_batches: 1
+limit_train_batches: null
+limit_val_batches: null
+wandb: false
+wandb_project: null
+wandb_group: null
+fail_on_non_finite: true
+lr: 6.25e-05
+alpha: 0.026
+optimizer:
+  name: adamw
+  adamw:
+    eps: 1.0e-05
+    weight_decay: 0.01
+  lbfgs:
+    lr: 1.0
+    max_iter: 20
+    history_size: 20
+    line_search_fn: strong_wolfe
+    tolerance_grad: 0.0
+    tolerance_change: 0.0
+    reset_history_each_step: true
+use_scheduler: true
+scheduler:
+  name: plateau
+  patience: 6
+  factor: 0.5
+  eta_min_factor: 0.1
+ema:
+  enabled: false
+  decay: 0.999
+multistage: false
+num_stages: 5
+stage_epochs: null
+output_dir: /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/IceMix-P14-Three-Pilot10pct_2026-09-25_10-02-45_job-13567223
+scratch_dir: /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/checkpoints/IceMix-P14-Three-Pilot10pct_2026-09-25_10-02-45_job-13567223
+checkpoint_dir: /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/IceMix-P14-Three-Pilot10pct_2026-09-25_10-02-45_job-13567223/checkpoints
+logs_dir: /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/IceMix-P14-Three-Pilot10pct_2026-09-25_10-02-45_job-13567223/logs
+ckpt_path: null
+fine_tune_from_ckpt: null
+fine_tune:
+  train_last_n_blocks: null
+attention:
+  model_name: IceMix
+  hidden_dim: 384
+  seq_length: 128
+  depth: 12
+  head_size: 32
+  n_rel: 4
+  scaled_emb: true
+  include_dynedge: false
+  n_features: 6
+  maha_encoder: false
+  dropout: 0.1
+  attn_drop: 0.05
+  proj_drop: 0.1
+  drop_path_rate: 0.2
+  token_drop: 0.0
+  pos_time_multiplier: 4096.0
+  charge_rde_multiplier: 1024.0
+  spacetime_distance_scale: 18.0
+  spacetime_distance_clip_min: -4.0
+  spacetime_distance_clip_max: 4.0
+  spacetime_distance_multiplier: 1024.0
+  mlp_ratio: 4.0
+  init_values: 1.0
+  n_freq: 10000.0
+data:
+  path:
+  - /tmp/ice_mix_p14/P14_numu_database_part_1.db
+  - /tmp/ice_mix_p14/P14_nue_database_part_1.db
+  - /tmp/ice_mix_p14/P14_nutau_database_part_1.db
+  pulsemap: SRTInIcePulses
+  target: direction
+  truth_table: truth
+  batch_size: 128
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  max_pulses: 256
+  augment_rotation: false
+  rotation_seed: null
+  split:
+    mode: csv
+    train_csvs:
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_numu_database_part_1_train.csv
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_nue_database_part_1_train.csv
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_nutau_database_part_1_train.csv
+    val_csvs:
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_numu_database_part_1_validation.csv
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_nue_database_part_1_validation.csv
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_nutau_database_part_1_validation.csv
+    test_csvs:
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_numu_database_part_1_test.csv
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_nue_database_part_1_test.csv
+    - /storage/project/r-itaboada3-0/rmaples3/software/cursor/graphnet/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections/P14_nutau_database_part_1_test.csv

@@ -1,0 +1,58 @@
+{
+  "reference_job": "13567223",
+  "reference_epochs": 5,
+  "epochs": 10,
+  "seed": 42,
+  "batch_size": 128,
+  "num_workers": 3,
+  "precision": "16-mixed",
+  "lr": 6.25E-05,
+  "adam_eps": 1E-05,
+  "weight_decay": 0.01,
+  "vertex_weight": 2.6,
+  "alpha": 0.026,
+  "scheduler_patience": 6,
+  "scheduler_factor": 0.5,
+  "accumulate_grad_batches": 1,
+  "max_pulses": 256,
+  "rotation_augmentation": false,
+  "early_stopping_patience": 0,
+  "selections": {
+    "P14_nue_database_part_1_test.csv": {
+      "count": 20305,
+      "sha256": "08b66452867f3a669d592b0a37f507795684134e980f4ea1f8d2b46d4d564ed5"
+    },
+    "P14_nue_database_part_1_train.csv": {
+      "count": 162434,
+      "sha256": "5b73e81db5e254690e65c806cc1380cc77b62ed0e32070bb7629df70f78ab6b5"
+    },
+    "P14_nue_database_part_1_validation.csv": {
+      "count": 20304,
+      "sha256": "a4a37d6264fb7ab80cb4865a46e6f31976dd6ee75480d660dffc51a00aa4eecb"
+    },
+    "P14_numu_database_part_1_test.csv": {
+      "count": 29000,
+      "sha256": "06fc5efe4af044f0941faad142a95317036209a88c10e3d992bd96a6ca870b44"
+    },
+    "P14_numu_database_part_1_train.csv": {
+      "count": 231990,
+      "sha256": "066ba56aa86ed13fddff7e0c3082f4a1fb0c95782a3f27eb18386923c0b6c60b"
+    },
+    "P14_numu_database_part_1_validation.csv": {
+      "count": 28998,
+      "sha256": "fd60cd150661673e4ae12d3c75ae7043d115567e3fe69b4e98dca2b3018d8332"
+    },
+    "P14_nutau_database_part_1_test.csv": {
+      "count": 22963,
+      "sha256": "05ed9731a23f9f7e15ac0bebab16708c1c80999071f1c47dd55ae248683ccc38"
+    },
+    "P14_nutau_database_part_1_train.csv": {
+      "count": 183697,
+      "sha256": "3a782ce861d8e1553616264688fce2efb3d3f47f2371bca47cada16711690bfc"
+    },
+    "P14_nutau_database_part_1_validation.csv": {
+      "count": 22962,
+      "sha256": "7d2ecf4548b48d13025d89c1dc8324b3541db4c238d175bc93248287fb32571e"
+    }
+  }
+}

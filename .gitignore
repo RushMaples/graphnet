@@ -168,3 +168,7 @@ data/examples/output/
 /.split_cache/
 /slurm/logs/
 /analysis/
+# Local/cluster comparison outputs contain event data and environment records.
+comparison_runs/
+comparison_summary/
+icemix-comparison-*.out

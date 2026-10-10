@@ -1,1 +1,5 @@
 src/graphnet/_version.py export-subst
+comparison/*.sbatch text eol=lf
+comparison/*.py text eol=lf
+comparison/*.json text eol=lf
+comparison/*.yaml text eol=lf

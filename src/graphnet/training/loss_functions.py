@@ -273,15 +273,21 @@ class LogCMK(torch.autograd.Function):
         ctx.dtype = dtype
         kappa = kappa.double()
         if m == 3:
-            # For m=3 the Bessel function has a closed form, so no host
-            # round-trip; `log1p` keeps it finite above kappa 700, where
-            # `scipy.special.iv` overflows.
-            return (
-                torch.log(kappa)
-                - kappa
-                - torch.log1p(-torch.exp(-2.0 * kappa))
+            # The uniform-sphere limit is finite at zero. Evaluate the
+            # small-kappa series separately so no log(0) is formed; expm1
+            # avoids cancellation in the remaining closed form.
+            small = kappa < 1e-4
+            result = torch.empty_like(kappa)
+            k = kappa[small]
+            result[small] = -np.log(4 * np.pi) - k**2 / 6 + k**4 / 180
+            k = kappa[~small]
+            result[~small] = (
+                torch.log(k)
+                - k
+                - torch.log(-torch.expm1(-2.0 * k))
                 - np.log(2 * np.pi)
-            ).type(dtype)
+            )
+            return result.type(dtype)
         iv = torch.from_numpy(
             scipy.special.iv(m / 2.0 - 1, kappa.cpu().numpy())
         ).to(kappa.device)
