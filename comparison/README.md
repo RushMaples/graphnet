@@ -229,6 +229,24 @@ Prediction timing explicitly includes loading, transfer and CSV export after
 kernel warm-up; it is not an isolated model-latency benchmark. Compare quality
 versus event exposure and GPU-hours; ten epochs still need not imply convergence.
 
+## Diagnosing a failed preflight
+
+The launcher writes `icemix-comparison-JOBID.out` in the submission directory,
+not the default `slurm-JOBID.out`. For a `check` job, step `.0` runs Carlos and
+step `.1` runs Ajai. Read the traceback before changing packages or resources:
+
+```bash
+sacct -j JOBID --format=JobID,State,ExitCode,MaxRSS,Elapsed
+tail -n 150 icemix-comparison-JOBID.out
+```
+
+Job 13945784 completed Carlos but failed while importing Ajai: the transformer
+package eagerly imported the unrelated ISeeCube model, which requires
+`torchscale`. The package now loads ISeeCube only when requested; IceMix does
+not need that dependency. Pull the fix and rerun the paired `check` job in the
+existing environment. No package installation is needed for this import fix.
+Use the new successful job's receipt for training, since the source changed.
+
 ## Local checks
 
 ```bash
