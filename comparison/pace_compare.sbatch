@@ -32,8 +32,23 @@ esac
 
 cd "$CHECKOUT"
 test -f comparison/run.py
-test -x "${ENV_PREFIX}/bin/python"
-test -d "$SELECTION_ROOT"
+if [[ ! -x "${ENV_PREFIX}/bin/python" ]]; then
+    echo "[FATAL] Pilot environment missing: ${ENV_PREFIX}/bin/python" >&2
+    echo "Source recovery does not restore a deleted Conda environment." >&2
+    exit 5
+fi
+if [[ ! -d "$SELECTION_ROOT" ]]; then
+    echo "[FATAL] Frozen pilot selections missing: $SELECTION_ROOT" >&2
+    echo "See comparison/README.md: Recovering a deleted Carlos checkout. Do not regenerate the splits." >&2
+    exit 6
+fi
+for variant in "${VARIANTS[@]}"; do
+    if [[ "$variant" == carlos && ! -f "${CARLOS_ROOT}/ice_mix/src/models/transformer.py" ]]; then
+        echo "[FATAL] Carlos baseline source missing: $CARLOS_ROOT" >&2
+        echo "Restore the pinned checkout with comparison/recover_carlos.py, or set CARLOS_ROOT to an existing baseline." >&2
+        exit 7
+    fi
+done
 if [[ -z "${TMPDIR:-}" || ! -d "$TMPDIR" ]]; then
     echo "[FATAL] Slurm node-local TMPDIR is required" >&2; exit 3
 fi

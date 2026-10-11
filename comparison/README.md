@@ -79,6 +79,46 @@ preflight will fail if they cannot supply the required classes. Source hashes
 database hashes are saved. This is a controlled new comparison, not a claim
 of byte-identical reproduction of the old job.
 
+## Recovering a deleted Carlos checkout
+
+The `check` and Carlos training jobs need Carlos' source. The default frozen
+selection directory also lived under that checkout. Ajai's fork cannot stand
+in for Carlos' baseline. The folder name itself is not important; alternative
+locations work through `CARLOS_ROOT` and `PILOT_SELECTION_ROOT`.
+
+The pinned public revision `1d83975e21b5b1c7f02efb797d5fc39f5f5735c6`
+contains all source classes imported by this comparison harness. A clone at
+that revision is sufficient for a new Carlos baseline run. It does not
+restore every uncommitted modification or checkpoint from the September job.
+
+Upload the locally recovered `p14_pilot_frozen_selections.tar.gz` to Phoenix,
+for example to your home directory. From the **new fork's root**, run:
+
+```bash
+git pull --ff-only origin main
+/storage/project/r-itaboada3-0/rmaples3/software/envs/graphnet/bin/python comparison/recover_carlos.py "$HOME/p14_pilot_frozen_selections.tar.gz"
+sbatch comparison/pace_compare.sbatch check
+```
+
+The recovery command validates the archive, clones Carlos' `cursor` branch
+into the original default location, checks out the pinned revision, and
+restores all nine CSVs with their original checksums and membership. It refuses
+to overwrite different files or an existing modified checkout. It does not
+install packages or require a GPU. An ordinary Python 3 interpreter can run it
+if the environment's interpreter is unavailable; the GPU jobs still require
+the environment to be restored separately.
+
+Deleting only `software/cursor` would not normally delete the separate
+`software/envs/graphnet` environment or the source databases under Jiyuan's
+directory. Confirm those paths still exist. If the old environment was also
+deleted, recover an environment export/backup before rebuilding; do not guess
+Torch/CUDA/PyG versions from current defaults.
+
+The nine original CSVs are preserved locally under
+`pilot_review_2026-09-30/bundle/ice_mix/outputs/pilot_10pct_p14_three_seed42/selections`.
+The recovery archive is a local transfer artifact, not committed to this
+public repository. Do not regenerate the original splits using seed 42.
+
 ## On Phoenix: preflight first
 
 Clone/pull `RushMaples/graphnet` into a **separate** directory from the old
