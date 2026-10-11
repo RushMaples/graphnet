@@ -137,14 +137,18 @@ sacctmgr -nP show assoc where user="$USER" format=Cluster,Account,Partition,QOS
 sinfo -h -o "%P %a %G"
 ```
 
-Use a permitted account/partition/QoS combination from the current cluster.
-For example, replace the placeholders below with verified values (omit
-partition/QoS exports if the site's defaults apply):
+On October 10, 2026, `rmaples3` reported associations for `gts-itaboada3`
+and `gts-itaboada3-cygnus`, both with `embers,inferno`, and an active
+`gpu-l40s` partition advertising `gpu:l40s`. Start with the general research
+account and the pilot's QoS below. Association and inventory listings alone
+do not establish partition access; require the test-only command to succeed.
+Other users should substitute their own permitted settings.
 
 ```bash
-export SBATCH_ACCOUNT="YOUR_VERIFIED_ACCOUNT"
-export SBATCH_PARTITION="YOUR_VERIFIED_GPU_PARTITION"
-export SBATCH_QOS="YOUR_VERIFIED_QOS"
+export SBATCH_ACCOUNT="gts-itaboada3"
+export SBATCH_PARTITION="gpu-l40s"
+export SBATCH_QOS="inferno"
+export SBATCH_GRES="gpu:l40s:1"
 sbatch --test-only comparison/pace_compare.sbatch check
 ```
 

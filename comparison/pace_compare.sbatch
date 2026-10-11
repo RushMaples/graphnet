@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:L40S:1
+#SBATCH --gres=gpu:l40s:1
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
 #SBATCH --output=icemix-comparison-%j.out
