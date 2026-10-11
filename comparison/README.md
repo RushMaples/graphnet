@@ -97,8 +97,9 @@ for example to your home directory. From the **new fork's root**, run:
 ```bash
 git pull --ff-only origin main
 /storage/project/r-itaboada3-0/rmaples3/software/envs/graphnet/bin/python comparison/recover_carlos.py "$HOME/p14_pilot_frozen_selections.tar.gz"
-sbatch comparison/pace_compare.sbatch check
 ```
+
+Then configure a current Slurm allocation and submit the preflight below.
 
 The recovery command validates the archive, clones Carlos' `cursor` branch
 into the original default location, checks out the pinned revision, and
@@ -120,6 +121,46 @@ The recovery archive is a local transfer artifact, not committed to this
 public repository. Do not regenerate the original splits using seed 42.
 
 ## On Phoenix: preflight first
+
+### Select a current Slurm allocation
+
+The archived pilot's account and QoS are historical records, not proof of
+current access. The launcher no longer hardcodes `gts-pli77-ideas_l40s` or
+`inferno`. An `Invalid account or account/partition combination` submission
+error occurs before the script starts; restoring sources or reinstalling the
+environment will not resolve it.
+
+Inspect your associations and the cluster's available GPU types:
+
+```bash
+sacctmgr -nP show assoc where user="$USER" format=Cluster,Account,Partition,QOS
+sinfo -h -o "%P %a %G"
+```
+
+Use a permitted account/partition/QoS combination from the current cluster.
+For example, replace the placeholders below with verified values (omit
+partition/QoS exports if the site's defaults apply):
+
+```bash
+export SBATCH_ACCOUNT="YOUR_VERIFIED_ACCOUNT"
+export SBATCH_PARTITION="YOUR_VERIFIED_GPU_PARTITION"
+export SBATCH_QOS="YOUR_VERIFIED_QOS"
+sbatch --test-only comparison/pace_compare.sbatch check
+```
+
+`--test-only` validates the resource request without submitting a job; it does
+not run the Python preflight. Slurm accepts these environment variables for
+all subsequent `sbatch` commands in the same shell. Command-line options take
+precedence. Review any existing `SBATCH_*` variables if an unexpected setting
+persists. See the [Slurm sbatch documentation](https://slurm.schedmd.com/sbatch.html).
+
+The script still requests the pilot's one L40S GPU. If your permitted partition
+has a different GPU type, explicitly override `--gres=gpu:TYPE:1` for the check
+and both training jobs, using the exact type reported by `sinfo`. Keep all
+three jobs on the same GPU type; rerun preflight after changing hardware, and
+do not attribute hardware differences from the historical pilot to model speed.
+
+### Run the paired preflight
 
 Clone/pull `RushMaples/graphnet` into a **separate** directory from the old
 Carlos checkout. From the new fork's root, run each command separately:

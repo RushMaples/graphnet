@@ -1,15 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=IceMixCompare10
-#SBATCH --account=gts-pli77-ideas_l40s
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:L40S:1
-#SBATCH --qos=inferno
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
 #SBATCH --output=icemix-comparison-%j.out
 
+# Set account/partition/QoS using sbatch options or SBATCH_* environment variables.
+# The archived pilot's allocation is not necessarily available to this user.
+# See comparison/README.md for read-only allocation discovery and --test-only.
 set -euo pipefail
 
 # Submit from the new fork's root. Do not reinstall into the working pilot env.
