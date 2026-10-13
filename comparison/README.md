@@ -167,10 +167,17 @@ do not attribute hardware differences from the historical pilot to model speed.
 ### Run the paired preflight
 
 Clone/pull `RushMaples/graphnet` into a **separate** directory from the old
-Carlos checkout. From the new fork's root, run each command separately:
+Carlos checkout. First check imports in the existing pilot environment on the
+login node, without database reads, model construction, or GPU allocation:
 
 ```bash
 git pull --ff-only origin main
+/storage/project/r-itaboada3-0/rmaples3/software/envs/graphnet/bin/python comparison/check_imports.py
+```
+
+After both import checks pass, run the real-data GPU preflight:
+
+```bash
 sbatch comparison/pace_compare.sbatch check
 ```
 
@@ -246,6 +253,26 @@ package eagerly imported the unrelated ISeeCube model, which requires
 not need that dependency. Pull the fix and rerun the paired `check` job in the
 existing environment. No package installation is needed for this import fix.
 Use the new successful job's receipt for training, since the source changed.
+
+Job 13965604 passed Carlos' one-batch preflight, then failed on an Ajai import
+of `lmdb`. The fork declares `lmdb>=1.4.1` in `setup.py`; adding this missing
+dependency is appropriate. Avoid a broad environment upgrade. From the fork
+root, capture the package versions and install only the missing package:
+
+```bash
+PILOT_PYTHON=/storage/project/r-itaboada3-0/rmaples3/software/envs/graphnet/bin/python
+mkdir -p comparison_runs/environment-repair
+"$PILOT_PYTHON" -m pip freeze > comparison_runs/environment-repair/before-lmdb.txt
+"$PILOT_PYTHON" -m pip install --no-deps --only-binary=:all: "lmdb>=1.4.1"
+"$PILOT_PYTHON" -m pip freeze > comparison_runs/environment-repair/after-lmdb.txt
+"$PILOT_PYTHON" comparison/check_imports.py
+```
+
+The wheel-only installation fails rather than compiling if a compatible wheel
+is unavailable. Both variants must use this same repaired environment and a
+new successful paired preflight receipt. The old job did not produce a
+successful paired receipt or ten-epoch comparison results. Import checks catch
+Python dependency errors before queueing; they do not certify CUDA execution.
 
 ## Local checks
 
