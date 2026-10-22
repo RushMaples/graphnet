@@ -101,11 +101,21 @@ class IceMix(Model):
         attn_drop: float = 0.05,
         proj_drop: float = 0.1,
         drop_path_rate: float = 0.2,
+        token_drop: float = 0.0,
+        drop_chance: float = 1.0,
     ) -> None:
         super().__init__()
         for rate in (dropout, attn_drop, proj_drop, drop_path_rate):
             if not 0 <= rate < 1:
                 raise ValueError("Dropout rates must lie in [0, 1)")
+        for rate in (token_drop, drop_chance):
+            if not 0 <= rate <= 1:
+                raise ValueError(
+                    "Pulse dropout probabilities must lie in [0, 1]"
+                )
+        self.token_drop = token_drop
+        self.drop_chance = drop_chance
+        self.token_drop_seed: Optional[int] = None
         self.fourier_ext = _RDEEncoder()
         self.rel_pos = SpacetimeEncoder(seq_length=32)
         self.sandwich = nn.ModuleList(
@@ -144,9 +154,54 @@ class IceMix(Model):
     def nb_outputs(self) -> int:
         return 384
 
+    def set_token_drop_seed(self, seed: Optional[int]) -> None:
+        """Set the batch seed; ``None`` restores global randomness."""
+        self.token_drop_seed = seed
+
+    def _token_drop_generator(
+        self, device: torch.device
+    ) -> Optional[torch.Generator]:
+        """Return a device-local generator reset to the current batch seed."""
+        if self.token_drop_seed is None:
+            return None
+        generator = torch.Generator(device=device)
+        generator.manual_seed(self.token_drop_seed)
+        return generator
+
     def forward(self, data: Data) -> Tuple[Tensor, Tensor]:
+        x_input = data.x
+        batch_input = data.batch
+        if self.training and self.token_drop > 0.0 and self.drop_chance > 0.0:
+            batch_size = int(batch_input.max().item() + 1)
+            generator = self._token_drop_generator(x_input.device)
+            event_drop_mask = (
+                torch.rand(
+                    batch_size,
+                    device=x_input.device,
+                    generator=generator,
+                )
+                < self.drop_chance
+            )
+            token_drop_mask = (
+                torch.rand(
+                    x_input.shape[0],
+                    device=x_input.device,
+                    generator=generator,
+                )
+                < self.token_drop
+            )
+            keep_mask = ~(event_drop_mask[batch_input] & token_drop_mask)
+            kept_per_event = torch.bincount(
+                batch_input[keep_mask], minlength=batch_size
+            )
+            for event_idx in torch.where(kept_per_event == 0)[0]:
+                first_token_idx = torch.where(batch_input == event_idx)[0][0]
+                keep_mask[first_token_idx] = True
+            x_input = x_input[keep_mask]
+            batch_input = batch_input[keep_mask]
+
         x0, pulse_mask, lengths = array_to_sequence(
-            data.x, data.batch, padding_value=0
+            x_input, batch_input, padding_value=0
         )
         x = self.fourier_ext(x0, lengths)
         rel_pos = self.rel_pos(x0)
@@ -196,6 +251,8 @@ class IceMixReconstruction(StandardModel):
         attn_drop: float = 0.05,
         proj_drop: float = 0.1,
         drop_path_rate: float = 0.2,
+        token_drop: float = 0.0,
+        drop_chance: float = 1.0,
     ) -> None:
         for value in (
             vertex_weight,
@@ -223,7 +280,14 @@ class IceMixReconstruction(StandardModel):
             raise ValueError(
                 "Vertex weight must be nonnegative and direction weight positive"
             )
-        backbone = IceMix(dropout, attn_drop, proj_drop, drop_path_rate)
+        backbone = IceMix(
+            dropout,
+            attn_drop,
+            proj_drop,
+            drop_path_rate,
+            token_drop=token_drop,
+            drop_chance=drop_chance,
+        )
         position_task = IdentityTask(
             nb_outputs=3,
             target_labels=POSITION_LABELS,

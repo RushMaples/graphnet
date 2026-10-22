@@ -1,5 +1,9 @@
 # Ten-epoch P14 comparison on PACE Phoenix
 
+For the subsequent four-arm augmentation screen and selected 80-epoch run,
+see [AUGMENTATION.md](AUGMENTATION.md). It uses the same frozen 10% selections
+and includes preflight inside each training allocation.
+
 This compares Carlos' original joint model with Ajai's vertex-normalized model
 using the successful September 25 pilot's data and hyperparameters. Each new
 run trains **10 epochs from scratch**, not five additional epochs from the old

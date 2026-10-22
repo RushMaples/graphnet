@@ -172,3 +172,4 @@ data/examples/output/
 comparison_runs/
 comparison_summary/
 icemix-comparison-*.out
+icemix-augmentation-*.out
