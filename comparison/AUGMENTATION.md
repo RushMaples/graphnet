@@ -50,8 +50,8 @@ Carlos configurations and augmentations actually enabled in the old pilots.
   after the screen. The validation-selected checkpoint is reloaded and exported
   on validation and the frozen test sample at the end. No early stopping.
 - One short seed is a screening result, not proof of small performance gains.
-  Prefer the simpler arm when differences are inconclusive; for manual review,
-  submit `screen` only rather than the automatic two-job helper.
+  Prefer the simpler arm when differences are inconclusive. The submission
+  helper queues the screen only so results can be reviewed first.
 
 ## Submit on Phoenix
 
@@ -65,25 +65,30 @@ bash comparison/submit_augmentation.sh
 
 The helper defaults to the previously working research allocation:
 `gts-itaboada3`, `gpu-l40s`, `inferno`, one `gpu:l40s:1`, 4 CPUs and 64 GB.
-It first calls Slurm `--test-only`, then submits the screen and an
-`afterok` dependent full job. The dependent job is cancelled if the dependency
-becomes invalid. Both allocations request 12 hours by default. The old
+It first calls Slurm `--test-only`, then submits one screen job.
+The 80-epoch run requires a separate submission after reviewing results.
+The screen allocation requests 12 hours by default. The old
 IceMix measurements suggest roughly one hour per ten epochs, but rotation,
 longer-run validation and cluster conditions may change this estimate.
-There are two scheduler waits, with preflight included in each allocation.
+Preflight is included in the screen allocation.
 
-For a manual decision before the 80-epoch job:
+When the screen finishes, inspect:
 
 ```bash
-sbatch --account=gts-itaboada3 --partition=gpu-l40s --qos=inferno comparison/pace_augment.sbatch screen
-# Read screen-JOBID/summary.csv and selected_arm.json, then:
+column -s, -t < comparison_runs/augmentation/screen-JOBID/summary.csv
+```
+
+After reviewing the results, the selected configuration can be trained for
+80 epochs with:
+
+```bash
 sbatch --account=gts-itaboada3 --partition=gpu-l40s --qos=inferno comparison/pace_augment.sbatch full "$PWD/comparison_runs/augmentation/screen-JOBID"
 ```
 
 Overrides: `ENV_PREFIX`, `SOURCE_DATA_ROOT`, `PILOT_SELECTION_ROOT`,
 `ICEMIX_CHECKOUT`, `AUGMENTATION_RUN_ROOT`, `SBATCH_ACCOUNT`,
 `SBATCH_PARTITION`, `SBATCH_QOS`, `SBATCH_GRES`; plus `SCREEN_EPOCHS`,
-`FULL_EPOCHS`, `SCREEN_TIME`, `FULL_TIME`, `TOKEN_DROP`, `DROP_CHANCE`.
+`FULL_EPOCHS`, `SCREEN_TIME`, `TOKEN_DROP`, `DROP_CHANCE`.
 Do not change these during a screen/full pair. The full run rejects source,
 data, environment, GPU model and common-setting changes since screening.
 The Carlos checkout is needed only as the default home of the frozen CSVs;
