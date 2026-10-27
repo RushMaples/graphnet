@@ -21,6 +21,10 @@ RUN_ROOT="${AUGMENTATION_RUN_ROOT:-${CHECKOUT}/comparison_runs/augmentation}"
 TARGET_EPOCHS="${FULL_EPOCHS:-80}"
 PATIENCE="${EARLY_STOP_PATIENCE:-12}"
 MIN_DELTA="${EARLY_STOP_MIN_DELTA:-0.0001}"
+# The launcher also passes this argument so the guard survives --export=NONE.
+EXCLUDE_NODES="${2-${EXCLUDE_NODES-atl1-1-01-004-31-0}}"
+if [[ "$EXCLUDE_NODES" == none ]]; then EXCLUDE_NODES=""; fi
+ACTUAL_NODE="${SLURMD_NODENAME:-$(hostname -s)}"
 cd "$CHECKOUT"
 test -f comparison/full_augmentation.py
 test -x "${ENV_PREFIX}/bin/python"
@@ -71,7 +75,23 @@ finish() {
     exit "$status"
 }
 trap finish EXIT
-begin_phase environment_and_imports
+begin_phase allocation_guard
+printf 'Assigned node: %s\nExcluded nodes: %s\n' "$ACTUAL_NODE" "${EXCLUDE_NODES:-none}"
+printf 'assigned_node=%s\nexcluded_nodes=%s\n' "$ACTUAL_NODE" "$EXCLUDE_NODES" \
+    > "${JOB_ROOT}/allocation.txt"
+if [[ -n "$EXCLUDE_NODES" ]]; then
+    if ! EXCLUDED_HOSTS="$(scontrol show hostnames "$EXCLUDE_NODES")" || [[ -z "$EXCLUDED_HOSTS" ]]; then
+        echo "Could not expand the excluded node list; refusing to start work." >&2
+        exit 5
+    fi
+    while IFS= read -r excluded; do
+        if [[ "$ACTUAL_NODE" == "$excluded" ]]; then
+            echo "Refusing excluded host $ACTUAL_NODE before GPU initialization or database staging." >&2
+            exit 5
+        fi
+    done <<< "$EXCLUDED_HOSTS"
+fi
+begin_phase environment_setup
 module load anaconda3/2022.05.0.1
 set +u
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -80,6 +100,46 @@ set -u
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=42
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export PYTHONPATH="${CHECKOUT}/src:${CHECKOUT}/comparison"
+# Catch a poisoned CUDA device before copying/scanning the P14 databases.
+# This process owns no model or training state and exits before model setup.
+begin_phase gpu_health
+srun --ntasks=1 --cpu-bind=cores "${ENV_PREFIX}/bin/python" - "${JOB_ROOT}/gpu_health.json" <<'PY'
+import json
+import os
+import sys
+import time
+from pathlib import Path
+import torch
+
+started = time.perf_counter()
+report = {
+    "passed": False,
+    "node": os.environ.get("SLURMD_NODENAME"),
+    "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+    "torch": torch.__version__,
+    "cuda_runtime": torch.version.cuda,
+}
+try:
+    if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
+        raise RuntimeError("GPU health check requires exactly one CUDA GPU")
+    report["gpu"] = torch.cuda.get_device_name(0)
+    count = 4096
+    values = torch.arange(count, device="cuda", dtype=torch.float32)
+    total = (values + 1).sum()
+    torch.cuda.synchronize()
+    if not torch.isfinite(total).item() or total.item() != count * (count + 1) / 2:
+        raise RuntimeError("GPU health kernel returned an invalid result")
+    report["passed"] = True
+except Exception as error:
+    report["error_type"] = type(error).__name__
+    report["error"] = str(error)
+    raise
+finally:
+    report["seconds"] = time.perf_counter() - started
+    Path(sys.argv[1]).write_text(json.dumps(report, indent=2) + "\n")
+print("GPU health check passed:", report["gpu"])
+PY
+begin_phase environment_and_imports
 python -c 'from graphnet.models.transformer.icemix import IceMixReconstruction; from full_augmentation import main; print("Full-run imports passed")'
 conda list --explicit > "${JOB_ROOT}/conda-explicit.txt"
 conda env export > "${JOB_ROOT}/conda-environment.yml"
