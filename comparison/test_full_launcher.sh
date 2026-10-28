@@ -50,14 +50,34 @@ SH
 cat > "$SCRATCH/bin/scontrol" <<'SH'
 #!/bin/bash
 set -eu
+printf 'CALL:%s\n' "$*" >> "$FIXTURE/scontrol.log"
 if [[ "$1 $2" == 'show hostnames' ]]; then
-    case "$3" in
-        'custom[01-02]') printf 'custom01\ncustom02\n' ;;
-        *) printf '%s\n' "${3//,/$'\n'}" ;;
-    esac
-elif [[ "$1 $2" == 'show job' ]]; then
+    [[ "${MOCK_MODE:-}" != expansion_failure ]] || exit 93
+    IFS=, read -r -a parts <<< "$3"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            'custom[01-02]') printf 'custom01\ncustom02\n' ;;
+            *) printf '%s\n' "$part" ;;
+        esac
+    done
+elif [[ "$1 $2 ${3-}" == '--oneliner show job' ]]; then
     [[ "$4" == 14509999 ]]
-    printf 'JobId=14509999 JobState=PENDING ExcNodeList=%s NodeList=(null)\n' "${EXCLUDE_NODES:-none}"
+    mode="${MOCK_MODE:-valid}"
+    [[ "$mode" != controller_failure ]] || exit 92
+    jobid=14509999 state=PENDING priority='Priority=0' exclusions="ExcNodeList=${MOCK_ACCEPTED_EXCLUSIONS-$EXCLUDE_NODES}"
+    case "$mode" in
+        wrong_id) jobid=14509998 ;;
+        running) state=RUNNING ;;
+        nonzero_priority) priority='Priority=1' ;;
+        missing_priority) priority='' ;;
+        missing_exclusions) exclusions='' ;;
+        null_exclusions) exclusions='ExcNodeList=(null)' ;;
+        duplicate_id) jobid='14509999 JobId=14509999' ;;
+    esac
+    printf 'JobId=%s JobState=%s %s %s NodeList=(null)\n' "$jobid" "$state" "$priority" "$exclusions"
+elif [[ "$1" == release ]]; then
+    [[ "$2" == 14509999 ]]
+    [[ "${MOCK_MODE:-}" != release_failure ]] || exit 94
 else exit 91
 fi
 SH
@@ -91,33 +111,77 @@ count_is() {
     [[ "$count" == "$3" ]] || fail "Expected $3 occurrences of '$2', found $count"
 }
 run_helper() {
-    local name="$1" choice="$2"
+    local name="$1" choice="$2" expected="${3:-0}" mode="${4:-valid}" accepted="${5-default}" status=0
     : > "$SCRATCH/sbatch.log"
+    : > "$SCRATCH/scontrol.log"
     (
         export SBATCH_EXCLUDE=stale-node
+        export MOCK_MODE="$mode"
+        unset MOCK_ACCEPTED_EXCLUSIONS
+        if [[ "$accepted" != default ]]; then export MOCK_ACCEPTED_EXCLUSIONS="$accepted"; fi
         if [[ "$choice" == default ]]; then unset EXCLUDE_NODES; else export EXCLUDE_NODES="$choice"; fi
         bash "$SOURCE_ROOT/comparison/submit_full.sh" "$SCRATCH/parent"
-    ) > "$SCRATCH/$name.out" 2>&1 || fail "Helper case $name failed"
+    ) > "$SCRATCH/$name.out" 2>&1 || status=$?
+    [[ "$status" == "$expected" ]] || { cat "$SCRATCH/$name.out" >&2; fail "Helper $name expected status $expected, got $status"; }
+    if [[ "$expected" == 2 ]]; then
+        [[ ! -s "$SCRATCH/sbatch.log" ]] || fail "Rejected exclusions submitted a job: $name"
+        [[ ! -s "$SCRATCH/scontrol.log" ]] || fail "Rejected exclusions queried controller: $name"
+        return
+    fi
     count_is "$SCRATCH/sbatch.log" 'CALL' 2
     count_is "$SCRATCH/sbatch.log" 'ARG:--test-only' 1
     count_is "$SCRATCH/sbatch.log" 'ARG:--parsable' 1
+    count_is "$SCRATCH/sbatch.log" 'ARG:--hold' 1
+    absent "$SCRATCH/sbatch.log" 'SBATCH_EXCLUDE:stale-node'
     contains "$SCRATCH/$name.out" 'Submitted batch job 14509999'
-    contains "$SCRATCH/$name.out" 'JobId=14509999'
+    contains "$SCRATCH/$name.out" 'Checkout:'
+    contains "$SCRATCH/$name.out" 'Revision:'
+    contains "$SCRATCH/scontrol.log" 'CALL:--oneliner show job 14509999'
+    [[ ! -e "$SCRATCH/runs/full-14509999" ]] || fail 'Helper created allocation directory'
+    contains "$SCRATCH/runs/submission-14509999.txt" 'job_id=14509999'
+    if [[ "$expected" == 0 ]]; then
+        contains "$SCRATCH/$name.out" 'Controller accepted:'
+        contains "$SCRATCH/$name.out" 'Priority=0'
+        contains "$SCRATCH/$name.out" 'Released verified job 14509999.'
+        count_is "$SCRATCH/scontrol.log" 'CALL:release 14509999' 1
+        contains "$SCRATCH/runs/submission-14509999.txt" 'Released verified job 14509999.'
+        [[ "$(tail -n 1 "$SCRATCH/scontrol.log")" == 'CALL:release 14509999' ]] || fail 'Release preceded verification'
+    elif [[ "$expected" == 6 ]]; then
+        count_is "$SCRATCH/scontrol.log" 'CALL:release 14509999' 1
+        contains "$SCRATCH/$name.out" 'Release command failed for job 14509999'
+        contains "$SCRATCH/$name.out" 'do not resubmit'
+    else
+        absent "$SCRATCH/scontrol.log" 'CALL:release'
+        contains "$SCRATCH/$name.out" 'job 14509999 was NOT released by this helper'
+        contains "$SCRATCH/$name.out" 'do not resubmit'
+        contains "$SCRATCH/runs/submission-14509999.txt" 'was NOT released'
+    fi
 }
+contains "$SOURCE_ROOT/comparison/pace_full.sbatch" '#SBATCH --exclude=atl1-1-01-004-31-0'
 run_helper default default
 count_is "$SCRATCH/sbatch.log" 'ARG:--exclude=atl1-1-01-004-31-0' 2
 count_is "$SCRATCH/sbatch.log" 'ARG:atl1-1-01-004-31-0' 2
 contains "$SCRATCH/default.out" 'ExcNodeList=atl1-1-01-004-31-0'
 run_helper custom 'custom[01-02]'
-count_is "$SCRATCH/sbatch.log" 'ARG:--exclude=custom[01-02]' 2
-count_is "$SCRATCH/sbatch.log" 'ARG:custom[01-02]' 2
-absent "$SCRATCH/sbatch.log" 'ARG:--exclude=atl1-1-01-004-31-0'
-contains "$SCRATCH/custom.out" 'ExcNodeList=custom[01-02]'
-run_helper none none
-absent "$SCRATCH/sbatch.log" 'ARG:--exclude='
-absent "$SCRATCH/sbatch.log" 'SBATCH_EXCLUDE:stale-node'
-contains "$SCRATCH/none.out" 'ExcNodeList=none'
-printf 'PASS: default/custom/disabled exclusions and submitted job receipts\n'
+count_is "$SCRATCH/sbatch.log" 'ARG:--exclude=atl1-1-01-004-31-0,custom[01-02]' 2
+count_is "$SCRATCH/sbatch.log" 'ARG:atl1-1-01-004-31-0,custom[01-02]' 2
+contains "$SCRATCH/custom.out" 'ExcNodeList=atl1-1-01-004-31-0,custom[01-02]'
+# Equivalent expanded host lists and supersets are safe; partial lists are not.
+run_helper expanded_range 'custom[01-02]' 0 valid 'custom02,atl1-1-01-004-31-0,custom01'
+run_helper accepted_range 'custom01,custom02' 0 valid 'atl1-1-01-004-31-0,custom[01-02]'
+run_helper superset default 0 valid 'other-node,atl1-1-01-004-31-0'
+run_helper missing_custom 'custom[01-02]' 5 valid 'atl1-1-01-004-31-0,custom01'
+run_helper wrong_exclusions default 5 valid other-node
+run_helper empty_exclusions default 5 valid ''
+for mode in missing_exclusions null_exclusions controller_failure missing_priority nonzero_priority wrong_id duplicate_id running expansion_failure; do
+    run_helper "$mode" default 5 "$mode"
+done
+run_helper release_failure default 6 release_failure
+run_helper none none 2
+contains "$SCRATCH/none.out" 'EXCLUDE_NODES cannot be empty or none'
+run_helper empty '' 2
+contains "$SCRATCH/empty.out" 'EXCLUDE_NODES cannot be empty or none'
+printf 'PASS: mandatory exclusions, held verification, fail-closed release and receipts\n'
 
 run_allocation() {
     local id="$1" node="$2" cuda_status="$3" excluded="$4" expected="$5" status=0

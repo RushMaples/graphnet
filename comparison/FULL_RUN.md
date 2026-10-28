@@ -16,26 +16,44 @@ bash comparison/submit_full.sh comparison_runs/augmentation/continue-14388200
 ```
 
 The helper validates the Slurm request without allocating resources, then
-submits **one** job. Import, source, input and numerical checks run inside that
-allocation, followed by training and export. There is no separate queued
-preflight job and no automatic follow-on job.
+submits **one job on hold**. It queries the controller and releases that same
+job only after confirming the job ID, pending/held state, zero priority and
+accepted excluded hosts. Import, source, input and numerical checks then run
+inside the allocation, followed by training and export. There is no separate
+queued preflight job and no automatic follow-on job.
 
 After two ECC failures on `atl1-1-01-004-31-0` (jobs 14421409 and 14503832),
-the launcher **temporarily excludes that node by default**. It passes
-`--exclude` explicitly to both Slurm calls, prints the excluded nodes, and
-shows the controller's `ExcNodeList` after submission. The batch script also
-checks its assigned host before initializing CUDA or staging databases.
+the launcher **temporarily excludes that node**. The exclusion is present in
+both the batch file's `#SBATCH` header and the helper's explicit Slurm options.
+Job 14510941 was stopped by the runtime guard after allocation to that same
+host; it did not initialize CUDA or start training. A runtime setting alone is
+not proof that the scheduler accepted the exclusion, so the helper now checks
+the controller's actual `ExcNodeList` before releasing a held submission.
+
+If the controller response is unavailable, lacks the required exclusions or
+does not confirm a pending held job, the helper **does not release it**. It
+prints the job ID and an inspection message. Inspect that existing job instead
+of submitting duplicates. Its submission/controller receipt is saved beside
+the run directories as `submission-JOBID.txt`. An unexpected controller state
+must be checked; the helper cannot assert that a scheduler which ignored the
+hold has kept the job held.
+
+The batch script also checks its assigned host before initializing CUDA or
+staging databases. It captures the controller record at allocation start in
+`slurm_job_at_start.txt`, including on a guard failure.
 
 An initial CUDA allocation/kernel/synchronization check runs **before** the
 large database copy and index scans. Its result is saved as `gpu_health.json`;
 failure ends the allocation before model/data setup. The later real-model
 preflight is retained. This check does not train or modify any checkpoint.
 
-`EXCLUDE_NODES` can supply a different Slurm node list. Only after PACE confirms
-repair, use `EXCLUDE_NODES=none` to disable this temporary exclusion. The helper
-clears inherited `SBATCH_EXCLUDE` so it cannot silently contradict the displayed
-selection. Excluding a host may increase queue time; it does not request an
-additional GPU.
+`EXCLUDE_NODES` can add other hosts to the blocked list; the known faulty node
+is always retained. Empty lists and `EXCLUDE_NODES=none` are rejected during
+this incident. After PACE confirms repair, remove the temporary block in a
+reviewed launcher update, including the batch header and runtime guard. The
+helper clears inherited `SBATCH_EXCLUDE` so it cannot silently contradict the
+displayed selection. Excluding a host may increase queue time; it does not
+request an additional GPU.
 
 Defaults are one L40S, four CPUs, 64 GB, account `gts-itaboada3`, partition
 `gpu-l40s`, QOS `inferno`, and an **eight-hour wall-time limit**. At the measured
@@ -101,6 +119,7 @@ artifacts in `both/`. The console log is `icemix-augmentation-full-JOBID.out`.
 | `both/wall_timing.json` | Driver startup, setup/probes, fitting, checkpoint selection, export and final diagnostics |
 | `phase_timing.csv`, `slurm_status.txt` | Allocation wrapper phases, database staging, exit code and wall duration |
 | `allocation.txt`, `gpu_health.json` | Assigned/excluded nodes and initial CUDA health check before database staging |
+| `slurm_job_at_start.txt` | Controller's job record at allocation time, for diagnosing scheduler/exclusion problems |
 | `gpu_telemetry.csv` | Assigned-GPU utilization, memory, power and temperature sampled every 30 seconds when available |
 | `both/checkpoints/` | Resumable last and selected/best weights |
 | Settings, provenance, input/database and checkpoint receipts | Reproducibility and integrity checks |
