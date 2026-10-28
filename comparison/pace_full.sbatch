@@ -1,15 +1,19 @@
 #!/bin/bash
 #SBATCH --job-name=IceMixFull
+#SBATCH --partition=gpu-l40s
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:l40s:1
-#SBATCH --exclude=atl1-1-01-004-31-0
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
 #SBATCH --output=icemix-augmentation-full-%j.out
 
 set -euo pipefail
+if [[ $# != 1 ]]; then
+    echo 'Usage: pace_full.sbatch CONTINUATION_ROOT' >&2
+    exit 2
+fi
 PARENT_ROOT="${1:?Provide the completed 30-epoch continuation directory}"
 PARENT_ROOT="$(cd "$PARENT_ROOT" && pwd)"
 PARENT_RUN="${PARENT_ROOT}/both"
@@ -22,17 +26,6 @@ RUN_ROOT="${AUGMENTATION_RUN_ROOT:-${CHECKOUT}/comparison_runs/augmentation}"
 TARGET_EPOCHS="${FULL_EPOCHS:-80}"
 PATIENCE="${EARLY_STOP_PATIENCE:-12}"
 MIN_DELTA="${EARLY_STOP_MIN_DELTA:-0.0001}"
-# Keep the faulty host blocked even for direct sbatch calls or missing exports.
-REQUIRED_EXCLUDE_NODE="atl1-1-01-004-31-0"
-EXCLUDE_NODES="${2-${EXCLUDE_NODES-$REQUIRED_EXCLUDE_NODE}}"
-if [[ -z "$EXCLUDE_NODES" || "$EXCLUDE_NODES" == none ]]; then
-    echo "The temporary faulty-node block cannot be disabled until PACE confirms repair." >&2
-    exit 2
-fi
-case ",$EXCLUDE_NODES," in
-    *",$REQUIRED_EXCLUDE_NODE,"*) ;;
-    *) EXCLUDE_NODES="${REQUIRED_EXCLUDE_NODE},${EXCLUDE_NODES}" ;;
-esac
 ACTUAL_NODE="${SLURMD_NODENAME:-$(hostname -s)}"
 cd "$CHECKOUT"
 test -f comparison/full_augmentation.py
@@ -84,25 +77,13 @@ finish() {
     exit "$status"
 }
 trap finish EXIT
-begin_phase allocation_guard
-printf 'Assigned node: %s\nExcluded nodes: %s\n' "$ACTUAL_NODE" "${EXCLUDE_NODES:-none}"
-printf 'assigned_node=%s\nexcluded_nodes=%s\n' "$ACTUAL_NODE" "$EXCLUDE_NODES" \
+begin_phase allocation_record
+printf 'Assigned node: %s\n' "$ACTUAL_NODE"
+printf 'assigned_node=%s\nhost_policy=any_l40s\n' "$ACTUAL_NODE" \
     > "${JOB_ROOT}/allocation.txt"
 if ! scontrol show job --oneliner "$SLURM_JOB_ID" \
     > "${JOB_ROOT}/slurm_job_at_start.txt" 2> "${JOB_ROOT}/slurm_job_at_start.stderr"; then
-    echo "Controller snapshot unavailable; the assigned-node guard remains active." >&2
-fi
-if [[ -n "$EXCLUDE_NODES" ]]; then
-    if ! EXCLUDED_HOSTS="$(scontrol show hostnames "$EXCLUDE_NODES")" || [[ -z "$EXCLUDED_HOSTS" ]]; then
-        echo "Could not expand the excluded node list; refusing to start work." >&2
-        exit 5
-    fi
-    while IFS= read -r excluded; do
-        if [[ "$ACTUAL_NODE" == "$excluded" ]]; then
-            echo "Refusing excluded host $ACTUAL_NODE before GPU initialization or database staging." >&2
-            exit 5
-        fi
-    done <<< "$EXCLUDED_HOSTS"
+    echo "Controller snapshot unavailable; continuing with assigned allocation." >&2
 fi
 begin_phase environment_setup
 module load anaconda3/2022.05.0.1

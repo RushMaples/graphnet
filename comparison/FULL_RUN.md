@@ -15,45 +15,53 @@ bash comparison/submit_full.sh comparison_runs/augmentation/continue-14388200 --
 bash comparison/submit_full.sh comparison_runs/augmentation/continue-14388200
 ```
 
-The helper validates the Slurm request without allocating resources, then
-submits **one job on hold**. It queries the controller and releases that same
-job only after confirming the job ID, pending/held state, zero priority and
-accepted excluded hosts. Import, source, input and numerical checks then run
-inside the allocation, followed by training and export. There is no separate
-queued preflight job and no automatic follow-on job.
+The helper submits **one ordinary job eligible for any L40S node** in
+`gpu-l40s`. It requests no specific host, excluded hosts, feature constraint,
+reservation, dependency or user hold. It makes one `sbatch` call; there is no
+queued preflight job, test-only scheduling request, hold/release sequence or
+automatic follow-on job. The dry run prints the request without calling Slurm.
 
-After two ECC failures on `atl1-1-01-004-31-0` (jobs 14421409 and 14503832),
-the launcher **temporarily excludes that node**. The exclusion is present in
-both the batch file's `#SBATCH` header and the helper's explicit Slurm options.
-Job 14510941 was stopped by the runtime guard after allocation to that same
-host; it did not initialize CUDA or start training. A runtime setting alone is
-not proof that the scheduler accepted the exclusion, so the helper now checks
-the controller's actual `ExcNodeList` before releasing a held submission.
+The temporary ECC-host exclusion and host-name rejection have been removed at
+the user's request. This includes `atl1-1-01-004-31-0`, where earlier jobs
+encountered ECC errors. The early CUDA health check below remains: a node is
+accepted regardless of its name, but an unusable assigned GPU still stops the
+job before database staging or training.
 
-If the controller response is unavailable, lacks the required exclusions or
-does not confirm a pending held job, the helper **does not release it**. It
-prints the job ID and an inspection message. Inspect that existing job instead
-of submitting duplicates. Its submission/controller receipt is saved beside
-the run directories as `submission-JOBID.txt`. An unexpected controller state
-must be checked; the helper cannot assert that a scheduler which ignored the
-hold has kept the job held.
+The helper clears inherited `SBATCH_*` settings after resolving its supported
+account/QOS overrides, and clears the `SLURM_CLUSTERS`, `SLURM_HINT` and legacy
+`SLURM_MEM_BIND` input aliases. Old shell settings cannot silently reintroduce a hold, exclusion,
+host list, reservation or conflicting resource request. The obsolete
+`EXCLUDE_NODES` setting is ignored. The partition and GPU type are fixed to
+`gpu-l40s` and `gpu:l40s:1`; account, QOS and wall-time overrides remain
+available. Use the helper rather than a bare `sbatch` call to get this cleanup.
 
-The batch script also checks its assigned host before initializing CUDA or
-staging databases. It captures the controller record at allocation start in
-`slurm_job_at_start.txt`, including on a guard failure.
+After submission, the helper saves the job ID and a read-only controller
+snapshot in `submission-JOBID.txt` beside the run directories. Failure to read
+that snapshot does not cancel or hold an accepted job. If the controller adds
+exclusions or other restrictions, those are site-side settings: the helper
+reports them without changing them. Consult PACE about unexpected controller
+restrictions instead of submitting duplicates. Scheduler access rules,
+availability and priority still determine when the job starts.
+
+The batch script records its assigned node and captures the controller record
+at allocation start in `slurm_job_at_start.txt`. It has no host-based guard.
 
 An initial CUDA allocation/kernel/synchronization check runs **before** the
 large database copy and index scans. Its result is saved as `gpu_health.json`;
 failure ends the allocation before model/data setup. The later real-model
 preflight is retained. This check does not train or modify any checkpoint.
 
-`EXCLUDE_NODES` can add other hosts to the blocked list; the known faulty node
-is always retained. Empty lists and `EXCLUDE_NODES=none` are rejected during
-this incident. After PACE confirms repair, remove the temporary block in a
-reviewed launcher update, including the batch header and runtime guard. The
-helper clears inherited `SBATCH_EXCLUDE` so it cannot silently contradict the
-displayed selection. Excluding a host may increase queue time; it does not
-request an additional GPU.
+To replace the previously blocked job 14516841, cancel only that job before
+the submission command above:
+
+```bash
+scancel 14516841
+sacct -j 14516841 --format=JobID,State,ExitCode,Elapsed
+```
+
+Accounting may take a moment to reflect cancellation. Check that the old job
+is cancelled or otherwise terminal before submitting its replacement. Cancelling
+the pending allocation does not remove the completed 30-epoch checkpoint.
 
 Defaults are one L40S, four CPUs, 64 GB, account `gts-itaboada3`, partition
 `gpu-l40s`, QOS `inferno`, and an **eight-hour wall-time limit**. At the measured
@@ -118,7 +126,7 @@ artifacts in `both/`. The console log is `icemix-augmentation-full-JOBID.out`.
 | `both/early_stopping.json` | Policy, carried initial state, final state and reason |
 | `both/wall_timing.json` | Driver startup, setup/probes, fitting, checkpoint selection, export and final diagnostics |
 | `phase_timing.csv`, `slurm_status.txt` | Allocation wrapper phases, database staging, exit code and wall duration |
-| `allocation.txt`, `gpu_health.json` | Assigned/excluded nodes and initial CUDA health check before database staging |
+| `allocation.txt`, `gpu_health.json` | Assigned node, unrestricted host policy and initial CUDA health check before database staging |
 | `slurm_job_at_start.txt` | Controller's job record at allocation time, for diagnosing scheduler/exclusion problems |
 | `gpu_telemetry.csv` | Assigned-GPU utilization, memory, power and temperature sampled every 30 seconds when available |
 | `both/checkpoints/` | Resumable last and selected/best weights |

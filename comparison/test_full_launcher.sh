@@ -44,42 +44,23 @@ cat > "$SCRATCH/bin/sbatch" <<'SH'
 set -eu
 printf 'CALL\n' >> "$FIXTURE/sbatch.log"
 printf 'ARG:%s\n' "$@" >> "$FIXTURE/sbatch.log"
-printf 'SBATCH_EXCLUDE:%s\n' "${SBATCH_EXCLUDE-<unset>}" >> "$FIXTURE/sbatch.log"
-if [[ "$1" != --test-only ]]; then printf '14509999;phoenix\n'; fi
+# Fail if any inherited submission input survived sanitation.
+for variable in "${!SBATCH_@}"; do printf 'LEAK:%s\n' "$variable" >> "$FIXTURE/sbatch.log"; done
+for variable in SLURM_CLUSTERS SLURM_HINT SLURM_MEM_BIND EXCLUDE_NODES; do
+    if [[ -v "$variable" ]]; then printf 'LEAK:%s\n' "$variable" >> "$FIXTURE/sbatch.log"; fi
+done
+[[ "${KEEP_USER_SETTING:-}" == preserved ]]
+[[ "${SLURM_CONF:-}" == /site/slurm.conf ]]
+[[ "${SLURM_JOB_ID:-}" == parent-allocation ]]
+printf '%s\n' "${MOCK_RESPONSE:-14509999;phoenix}"
 SH
 cat > "$SCRATCH/bin/scontrol" <<'SH'
 #!/bin/bash
 set -eu
 printf 'CALL:%s\n' "$*" >> "$FIXTURE/scontrol.log"
-if [[ "$1 $2" == 'show hostnames' ]]; then
-    [[ "${MOCK_MODE:-}" != expansion_failure ]] || exit 93
-    IFS=, read -r -a parts <<< "$3"
-    for part in "${parts[@]}"; do
-        case "$part" in
-            'custom[01-02]') printf 'custom01\ncustom02\n' ;;
-            *) printf '%s\n' "$part" ;;
-        esac
-    done
-elif [[ "$1 $2 ${3-}" == '--oneliner show job' ]]; then
-    [[ "$4" == 14509999 ]]
-    mode="${MOCK_MODE:-valid}"
-    [[ "$mode" != controller_failure ]] || exit 92
-    jobid=14509999 state=PENDING priority='Priority=0' exclusions="ExcNodeList=${MOCK_ACCEPTED_EXCLUSIONS-$EXCLUDE_NODES}"
-    case "$mode" in
-        wrong_id) jobid=14509998 ;;
-        running) state=RUNNING ;;
-        nonzero_priority) priority='Priority=1' ;;
-        missing_priority) priority='' ;;
-        missing_exclusions) exclusions='' ;;
-        null_exclusions) exclusions='ExcNodeList=(null)' ;;
-        duplicate_id) jobid='14509999 JobId=14509999' ;;
-    esac
-    printf 'JobId=%s JobState=%s %s %s NodeList=(null)\n' "$jobid" "$state" "$priority" "$exclusions"
-elif [[ "$1" == release ]]; then
-    [[ "$2" == 14509999 ]]
-    [[ "${MOCK_MODE:-}" != release_failure ]] || exit 94
-else exit 91
-fi
+[[ "$*" == '--oneliner show job 14509999' || "$*" == 'show job --oneliner '* ]] || exit 91
+[[ "${MOCK_MODE:-}" != controller_failure ]] || exit 92
+printf 'JobId=14509999 JobState=RUNNING Priority=100 ExcNodeList=site-policy-node NodeList=atl1-1-01-004-31-0\n'
 SH
 cat > "$SCRATCH/bin/conda" <<'SH'
 #!/bin/bash
@@ -111,113 +92,113 @@ count_is() {
     [[ "$count" == "$3" ]] || fail "Expected $3 occurrences of '$2', found $count"
 }
 run_helper() {
-    local name="$1" choice="$2" expected="${3:-0}" mode="${4:-valid}" accepted="${5-default}" status=0
+    local name="$1" mode="${2:-valid}" expected="${3:-0}" status=0
+    local account=custom-account qos=custom-qos time_limit=07:00:00
+    if [[ "$mode" == defaults ]]; then
+        account=gts-itaboada3 qos=inferno time_limit=08:00:00
+    fi
     : > "$SCRATCH/sbatch.log"
     : > "$SCRATCH/scontrol.log"
     (
-        export SBATCH_EXCLUDE=stale-node
-        export MOCK_MODE="$mode"
-        unset MOCK_ACCEPTED_EXCLUSIONS
-        if [[ "$accepted" != default ]]; then export MOCK_ACCEPTED_EXCLUSIONS="$accepted"; fi
-        if [[ "$choice" == default ]]; then unset EXCLUDE_NODES; else export EXCLUDE_NODES="$choice"; fi
-        bash "$SOURCE_ROOT/comparison/submit_full.sh" "$SCRATCH/parent"
+        export SBATCH_ACCOUNT=custom-account SBATCH_QOS=custom-qos FULL_TIME=07:00:00
+        export SBATCH_EXCLUDE=stale-node SBATCH_NODELIST=stale-node SBATCH_CONSTRAINT=stale
+        export SBATCH_HOLD=yes SBATCH_DEPENDENCY=afterok:1 SBATCH_RESERVATION=stale
+        export SBATCH_PARTITION=wrong SBATCH_GRES=gpu:wrong:4 SBATCH_MEM_PER_GPU=999G
+        export SBATCH_MEM_PER_CPU=999G SBATCH_GPUS=4 SBATCH_CPUS_PER_GPU=99
+        export SBATCH_EXPORT=NONE SBATCH_CLUSTERS=wrong SBATCH_WAIT=yes
+        export SLURM_CLUSTERS=wrong SLURM_HINT=nomultithread SLURM_MEM_BIND=local
+        export EXCLUDE_NODES=atl1-1-01-004-31-0 KEEP_USER_SETTING=preserved
+        export SLURM_CONF=/site/slurm.conf SLURM_JOB_ID=parent-allocation MOCK_MODE="$mode"
+        if [[ "$mode" == defaults ]]; then
+            for variable in "${!SBATCH_@}"; do unset "$variable"; done
+            unset FULL_TIME
+        fi
+        if [[ "$mode" == unexpected ]]; then export MOCK_RESPONSE='Submitted something unclear'; fi
+        if [[ "$mode" == dry ]]; then
+            bash "$SOURCE_ROOT/comparison/submit_full.sh" "$SCRATCH/parent" --dry-run
+        else
+            bash "$SOURCE_ROOT/comparison/submit_full.sh" "$SCRATCH/parent"
+        fi
     ) > "$SCRATCH/$name.out" 2>&1 || status=$?
-    [[ "$status" == "$expected" ]] || { cat "$SCRATCH/$name.out" >&2; fail "Helper $name expected status $expected, got $status"; }
-    if [[ "$expected" == 2 ]]; then
-        [[ ! -s "$SCRATCH/sbatch.log" ]] || fail "Rejected exclusions submitted a job: $name"
-        [[ ! -s "$SCRATCH/scontrol.log" ]] || fail "Rejected exclusions queried controller: $name"
+    [[ "$status" == "$expected" ]] || { cat "$SCRATCH/$name.out" >&2; fail "$name expected $expected, got $status"; }
+    contains "$SCRATCH/$name.out" 'Command: sbatch --parsable'
+    if [[ "$mode" == dry ]]; then
+        [[ ! -s "$SCRATCH/sbatch.log" && ! -s "$SCRATCH/scontrol.log" ]] || fail 'Dry run invoked Slurm'
+        contains "$SCRATCH/$name.out" 'Dry run: no job submitted.'
         return
     fi
-    count_is "$SCRATCH/sbatch.log" 'CALL' 2
-    count_is "$SCRATCH/sbatch.log" 'ARG:--test-only' 1
-    count_is "$SCRATCH/sbatch.log" 'ARG:--parsable' 1
-    count_is "$SCRATCH/sbatch.log" 'ARG:--hold' 1
-    absent "$SCRATCH/sbatch.log" 'SBATCH_EXCLUDE:stale-node'
-    contains "$SCRATCH/$name.out" 'Submitted batch job 14509999'
-    contains "$SCRATCH/$name.out" 'Checkout:'
-    contains "$SCRATCH/$name.out" 'Revision:'
+    count_is "$SCRATCH/sbatch.log" 'CALL' 1
+    absent "$SCRATCH/sbatch.log" 'LEAK:'
+    for arg in --parsable "--account=$account" "--qos=$qos" --partition=gpu-l40s \
+        --gres=gpu:l40s:1 --nodes=1 --ntasks=1 --cpus-per-task=4 --mem=64G "--time=$time_limit"; do
+        contains "$SCRATCH/sbatch.log" "ARG:$arg"
+    done
+    for arg in --hold --exclude --nodelist --constraint --test-only --dependency --reservation; do
+        absent "$SCRATCH/sbatch.log" "ARG:$arg"
+    done
+    count_is "$SCRATCH/sbatch.log" 'ARG:' 12
+    if [[ "$mode" == unexpected ]]; then
+        [[ ! -s "$SCRATCH/scontrol.log" ]] || fail 'Unexpected response queried controller'
+        contains "$SCRATCH/$name.out" 'do not resubmit blindly'
+        return
+    fi
+    count_is "$SCRATCH/scontrol.log" 'CALL:' 1
     contains "$SCRATCH/scontrol.log" 'CALL:--oneliner show job 14509999'
-    [[ ! -e "$SCRATCH/runs/full-14509999" ]] || fail 'Helper created allocation directory'
+    contains "$SCRATCH/$name.out" 'Submitted batch job 14509999.'
     contains "$SCRATCH/runs/submission-14509999.txt" 'job_id=14509999'
-    if [[ "$expected" == 0 ]]; then
-        contains "$SCRATCH/$name.out" 'Controller accepted:'
-        contains "$SCRATCH/$name.out" 'Priority=0'
-        contains "$SCRATCH/$name.out" 'Released verified job 14509999.'
-        count_is "$SCRATCH/scontrol.log" 'CALL:release 14509999' 1
-        contains "$SCRATCH/runs/submission-14509999.txt" 'Released verified job 14509999.'
-        [[ "$(tail -n 1 "$SCRATCH/scontrol.log")" == 'CALL:release 14509999' ]] || fail 'Release preceded verification'
-    elif [[ "$expected" == 6 ]]; then
-        count_is "$SCRATCH/scontrol.log" 'CALL:release 14509999' 1
-        contains "$SCRATCH/$name.out" 'Release command failed for job 14509999'
-        contains "$SCRATCH/$name.out" 'do not resubmit'
+    contains "$SCRATCH/runs/submission-14509999.txt" 'host_policy=any_l40s'
+    contains "$SCRATCH/runs/submission-14509999.txt" 'requested_exclusions=none'
+    [[ ! -e "$SCRATCH/runs/full-14509999" ]] || fail 'Helper created allocation directory'
+    if [[ "$mode" == controller_failure ]]; then
+        contains "$SCRATCH/$name.out" 'submitted successfully'
+        contains "$SCRATCH/runs/submission-14509999.txt" 'controller inspection failed'
     else
-        absent "$SCRATCH/scontrol.log" 'CALL:release'
-        contains "$SCRATCH/$name.out" 'job 14509999 was NOT released by this helper'
-        contains "$SCRATCH/$name.out" 'do not resubmit'
-        contains "$SCRATCH/runs/submission-14509999.txt" 'was NOT released'
+        contains "$SCRATCH/runs/submission-14509999.txt" 'ExcNodeList=site-policy-node'
+        contains "$SCRATCH/$name.out" 'JobState=RUNNING'
     fi
 }
-contains "$SOURCE_ROOT/comparison/pace_full.sbatch" '#SBATCH --exclude=atl1-1-01-004-31-0'
-run_helper default default
-count_is "$SCRATCH/sbatch.log" 'ARG:--exclude=atl1-1-01-004-31-0' 2
-count_is "$SCRATCH/sbatch.log" 'ARG:atl1-1-01-004-31-0' 2
-contains "$SCRATCH/default.out" 'ExcNodeList=atl1-1-01-004-31-0'
-run_helper custom 'custom[01-02]'
-count_is "$SCRATCH/sbatch.log" 'ARG:--exclude=atl1-1-01-004-31-0,custom[01-02]' 2
-count_is "$SCRATCH/sbatch.log" 'ARG:atl1-1-01-004-31-0,custom[01-02]' 2
-contains "$SCRATCH/custom.out" 'ExcNodeList=atl1-1-01-004-31-0,custom[01-02]'
-# Equivalent expanded host lists and supersets are safe; partial lists are not.
-run_helper expanded_range 'custom[01-02]' 0 valid 'custom02,atl1-1-01-004-31-0,custom01'
-run_helper accepted_range 'custom01,custom02' 0 valid 'atl1-1-01-004-31-0,custom[01-02]'
-run_helper superset default 0 valid 'other-node,atl1-1-01-004-31-0'
-run_helper missing_custom 'custom[01-02]' 5 valid 'atl1-1-01-004-31-0,custom01'
-run_helper wrong_exclusions default 5 valid other-node
-run_helper empty_exclusions default 5 valid ''
-for mode in missing_exclusions null_exclusions controller_failure missing_priority nonzero_priority wrong_id duplicate_id running expansion_failure; do
-    run_helper "$mode" default 5 "$mode"
+run_helper dry dry
+run_helper valid
+run_helper defaults defaults
+run_helper controller_failure controller_failure
+run_helper unexpected unexpected 4
+# Direct submission has fixed L40S defaults and no host-based restrictions.
+for arg in '--partition=gpu-l40s' '--nodes=1' '--ntasks=1' '--cpus-per-task=4' '--gres=gpu:l40s:1' '--mem=64G' '--time=08:00:00'; do
+    contains "$SOURCE_ROOT/comparison/pace_full.sbatch" "#SBATCH $arg"
 done
-run_helper release_failure default 6 release_failure
-run_helper none none 2
-contains "$SCRATCH/none.out" 'EXCLUDE_NODES cannot be empty or none'
-run_helper empty '' 2
-contains "$SCRATCH/empty.out" 'EXCLUDE_NODES cannot be empty or none'
-printf 'PASS: mandatory exclusions, held verification, fail-closed release and receipts\n'
-
+for restriction in '#SBATCH --exclude' '#SBATCH --nodelist' '#SBATCH --constraint' 'EXCLUDE_NODES' 'REQUIRED_EXCLUDE_NODE' 'show hostnames'; do
+    absent "$SOURCE_ROOT/comparison/pace_full.sbatch" "$restriction"
+done
+printf 'PASS: single unrestricted L40S submission, sanitized inputs and read-only receipts\n'
 run_allocation() {
-    local id="$1" node="$2" cuda_status="$3" excluded="$4" expected="$5" status=0
+    local id="$1" node="$2" cuda_status="$3" expected="$4" status=0
     : > "$SCRATCH/work.log"
     (
-        unset EXCLUDE_NODES
-        export SLURM_JOB_ID="$id" SLURMD_NODENAME="$node" MOCK_CUDA_STATUS="$cuda_status"
-        bash "$SOURCE_ROOT/comparison/pace_full.sbatch" "$SCRATCH/parent" "$excluded"
+        export EXCLUDE_NODES="$node" SLURM_JOB_ID="$id" SLURMD_NODENAME="$node"
+        export MOCK_CUDA_STATUS="$cuda_status" MOCK_MODE=controller_failure
+        bash "$SOURCE_ROOT/comparison/pace_full.sbatch" "$SCRATCH/parent"
     ) > "$SCRATCH/$id.out" 2>&1 || status=$?
-    [[ "$status" == "$expected" ]] || {
-        cat "$SCRATCH/$id.out" >&2
-        fail "Allocation $id expected status $expected, got $status"
-    }
+    [[ "$status" == "$expected" ]] || { cat "$SCRATCH/$id.out" >&2; fail "Allocation $id expected $expected, got $status"; }
     contains "$SCRATCH/runs/full-$id/slurm_status.txt" "exit_code=$expected"
+    contains "$SCRATCH/runs/full-$id/allocation.txt" "assigned_node=$node"
+    contains "$SCRATCH/runs/full-$id/allocation.txt" 'host_policy=any_l40s'
 }
-run_allocation 101 atl1-1-01-004-31-0 0 atl1-1-01-004-31-0 5
-[[ ! -s "$SCRATCH/work.log" ]] || fail 'Excluded host ran Python or srun'
-contains "$SCRATCH/runs/full-101/slurm_status.txt" 'last_phase=allocation_guard'
+run_allocation 101 atl1-1-01-004-31-0 23 23
+contains "$SCRATCH/runs/full-101/slurm_status.txt" 'last_phase=gpu_health'
 absent "$SCRATCH/runs/full-101/phase_timing.csv" 'database_staging'
-# The positional argument must survive a missing exported EXCLUDE_NODES variable.
-run_allocation 102 custom02 0 'custom[01-02]' 5
-[[ ! -s "$SCRATCH/work.log" ]] || fail 'Custom excluded host ran work'
-run_allocation 103 safe-node 23 atl1-1-01-004-31-0 23
-contains "$SCRATCH/runs/full-103/slurm_status.txt" 'last_phase=gpu_health'
-absent "$SCRATCH/runs/full-103/phase_timing.csv" 'database_staging'
 absent "$SCRATCH/work.log" 'python'
-contains "$SCRATCH/gpu-smoke.py.txt" 'torch.arange('
-contains "$SCRATCH/gpu-smoke.py.txt" 'device="cuda"'
-contains "$SCRATCH/gpu-smoke.py.txt" 'total = (values + 1).sum()'
-contains "$SCRATCH/gpu-smoke.py.txt" 'torch.cuda.synchronize()'
-contains "$SCRATCH/gpu-smoke.py.txt" 'torch.isfinite(total).item()'
-contains "$SCRATCH/gpu-smoke.py.txt" 'total.item() != count * (count + 1) / 2'
-# Missing fixture databases deliberately stop immediately after the phase begins.
-run_allocation 104 safe-node 0 atl1-1-01-004-31-0 1
-contains "$SCRATCH/runs/full-104/slurm_status.txt" 'last_phase=database_staging'
-contains "$SCRATCH/work.log" 'python'
-[[ ! -e "$SCRATCH/node-tmp/icemix-full-104" ]] || fail 'Unexpected fixture database copy'
-printf 'PASS: assigned-node guards, CUDA failure ordering and mocked staging readiness\n'
+for statement in 'torch.arange(' 'device="cuda"' 'total = (values + 1).sum()' \
+    'torch.cuda.synchronize()' 'torch.isfinite(total).item()' 'total.item() != count * (count + 1) / 2'; do
+    contains "$SCRATCH/gpu-smoke.py.txt" "$statement"
+done
+# Missing fixture databases deliberately stop after entering staging.
+for node in atl1-1-01-004-31-0 another-l40s; do
+    id=102
+    [[ "$node" == another-l40s ]] && id=103
+    run_allocation "$id" "$node" 0 1
+    contains "$SCRATCH/runs/full-$id/slurm_status.txt" 'last_phase=database_staging'
+    contains "$SCRATCH/work.log" 'python'
+    [[ ! -e "$SCRATCH/node-tmp/icemix-full-$id" ]] || fail 'Unexpected fixture database copy'
+done
+printf 'PASS: any assigned host, CUDA failure ordering and mocked staging readiness\n'
 printf 'All full-launcher shell regressions passed (mocked; no GPU validation).\n'
