@@ -1,0 +1,5 @@
+# Install in a clone of the working PACE GraphNeT environment, used by all arms.
+# Official source setup metadata declares version 1.1.0; unavailable on inspected PyPI index.
+# Install with --no-deps to preserve the existing Torch/NumPy/PyG stack.
+torchdiffeq==0.2.5
+jammy_flows @ git+https://github.com/thoglu/jammy_flows.git@51f70764c12272715c3f47c593cccd1701d978c7
